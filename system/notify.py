@@ -4,7 +4,6 @@ from jinja2 import Template
 import logging
 import os
 from pinecone import Pinecone
-import requests
 import re
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
