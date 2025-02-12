@@ -19,6 +19,16 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Spinner } from "@/components/ui/spinner";
 import { useSearchParams } from "next/navigation";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 
 export default function Main() {
     const { user, loading, signIn, signUp, signOut, sendEmailVerification } =
@@ -28,6 +38,7 @@ export default function Main() {
     const [isResend, setIsResend] = useState(false);
     const [hasSent, setHasSent] = useState(false);
     const [isFormLoading, setIsFormLoading] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
     const toggleSignType = () => {
         setError("");
         setIsSignIn(!isSignIn);
@@ -41,6 +52,10 @@ export default function Main() {
             ? "There was an error verifying your email. Please resend the verification email."
             : ""
     );
+
+    const [frequency, setFrequency] = useState("daily");
+    const [dayOfWeek, setDayOfWeek] = useState("Monday");
+    const [interests, setInterests] = useState("");
 
     const currSchema = isResend
         ? resendSchema
@@ -85,25 +100,128 @@ export default function Main() {
                 that you're interested in.{" "}
                 {user == null &&
                     !loading &&
-                    "Sign up to set your preferences and start getting cool news."}
+                    "Sign up to set your interests and start getting cool news."}
             </div>
 
             {!loading ? (
                 user ? (
-                    <Button
-                        className="w-fit bg-primary text-accent font-bold hover:opacity-60 transition duration-200"
-                        type="button"
-                        onClick={() => {
-                            setIsFormLoading(true);
-                            signOut().then(() => setIsFormLoading(false));
-                        }}
-                    >
-                        {isFormLoading ? (
-                            <Spinner className="text-black" />
-                        ) : (
-                            "Sign out"
-                        )}
-                    </Button>
+                    <Card className="min-w-[600px]">
+                        <CardContent className="flex flex-col pt-5 space-y-4">
+                            <div className="space-y-4">
+                                <Label className="text-lg font-semibold">
+                                    Email frequency
+                                </Label>
+                                <RadioGroup
+                                    value={frequency}
+                                    onValueChange={setFrequency}
+                                    className="flex flex-col space-y-2"
+                                >
+                                    <div className="flex items-center space-x-2">
+                                        <RadioGroupItem
+                                            value="daily"
+                                            id="daily"
+                                        />
+                                        <Label htmlFor="daily">Daily</Label>
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                        <RadioGroupItem
+                                            value="weekly"
+                                            id="weekly"
+                                        />
+                                        <Label htmlFor="weekly">Weekly</Label>
+                                    </div>
+                                </RadioGroup>
+                            </div>
+                            {frequency === "weekly" && (
+                                <div className="space-y-2">
+                                    <Label htmlFor="day-select">
+                                        Select day of the week:
+                                    </Label>
+                                    <Select
+                                        value={dayOfWeek}
+                                        onValueChange={setDayOfWeek}
+                                    >
+                                        <SelectTrigger id="day-select">
+                                            <SelectValue placeholder="Select a day" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="Sunday">
+                                                Sunday
+                                            </SelectItem>
+                                            <SelectItem value="Monday">
+                                                Monday
+                                            </SelectItem>
+                                            <SelectItem value="Tuesday">
+                                                Tuesday
+                                            </SelectItem>
+                                            <SelectItem value="Wednesday">
+                                                Wednesday
+                                            </SelectItem>
+                                            <SelectItem value="Thursday">
+                                                Thursday
+                                            </SelectItem>
+                                            <SelectItem value="Friday">
+                                                Friday
+                                            </SelectItem>
+                                            <SelectItem value="Saturday">
+                                                Saturday
+                                            </SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            )}
+                            <p className="text-sm opacity-60">
+                                You will receive emails every{" "}
+                                {frequency == "daily" ? "day" : dayOfWeek} at
+                                8am.
+                            </p>
+                            <div className="space-y-2">
+                                <Label
+                                    htmlFor="interests"
+                                    className="text-lg font-semibold"
+                                >
+                                    Interests
+                                </Label>
+                                <Textarea
+                                    id="preferences"
+                                    placeholder="Describe what you're interested in here..."
+                                    value={interests}
+                                    onChange={(e) =>
+                                        setInterests(e.target.value)
+                                    }
+                                    className="min-h-[100px]"
+                                />
+                            </div>
+                        </CardContent>
+                        <CardFooter className="flex items-center justify-between">
+                            <Button
+                                className="w-fit border bg-transparent text-accent font-bold hover:opacity-60 transition duration-200"
+                                type="button"
+                                onClick={() => {
+                                    setIsFormLoading(true);
+                                    signOut().then(() =>
+                                        setIsFormLoading(false)
+                                    );
+                                }}
+                            >
+                                {isFormLoading ? (
+                                    <Spinner className="text-black" />
+                                ) : (
+                                    "Sign out"
+                                )}
+                            </Button>
+                            <Button
+                                className="w-fit bg-primary text-accent font-bold hover:opacity-60 transition duration-200"
+                                type="button"
+                            >
+                                {isSaving ? (
+                                    <Spinner className="text-black" />
+                                ) : (
+                                    "Save"
+                                )}
+                            </Button>
+                        </CardFooter>
+                    </Card>
                 ) : (
                     <Card className="w-full max-w-md">
                         {hasSent ? (
