@@ -1,5 +1,5 @@
-import Landing from "@/app/Landing";
+import Main from "@/app/Main";
 
 export default function Home() {
-    return <Landing />;
+    return <Main />;
 }
