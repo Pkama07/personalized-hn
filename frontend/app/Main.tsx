@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -29,10 +29,29 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import {
+    createProfile,
+    fetchUserProfile,
+    saveProfile,
+} from "@/supabase/actions";
+
+const getOrCreateProfile = async (id: string) => {
+    let profile = await fetchUserProfile(id);
+    if (!profile.data || profile.data.length == 0) {
+        profile = await createProfile(id);
+    }
+    return profile;
+};
 
 export default function Main() {
-    const { user, loading, signIn, signUp, signOut, sendEmailVerification } =
-        useAuth();
+    const {
+        user,
+        loading: sessionLoading,
+        signIn,
+        signUp,
+        signOut,
+        sendEmailVerification,
+    } = useAuth();
 
     const [isSignIn, setIsSignIn] = useState(true);
     const [isResend, setIsResend] = useState(false);
@@ -53,9 +72,23 @@ export default function Main() {
             : ""
     );
 
-    const [frequency, setFrequency] = useState("daily");
-    const [dayOfWeek, setDayOfWeek] = useState("Monday");
+    const [frequency, setFrequency] = useState("");
+    const [dayOfWeek, setDayOfWeek] = useState("");
     const [interests, setInterests] = useState("");
+    const [hasLoadedProfile, setHasLoadedProfile] = useState(false);
+
+    useEffect(() => {
+        if (!user) return;
+        getOrCreateProfile(user.id).then((profile) => {
+            if (!profile.data) return;
+            const info = profile.data[0];
+            setFrequency(info.frequency);
+            setDayOfWeek(info.weekday);
+            setInterests(info.interests);
+            setError("");
+            setHasLoadedProfile(true);
+        });
+    }, [user]);
 
     const currSchema = isResend
         ? resendSchema
@@ -87,25 +120,36 @@ export default function Main() {
         setIsFormLoading(false);
     };
 
+    const validateAndSave = async () => {
+        setIsSaving(true);
+        if (interests.length == 0) {
+        }
+        setIsSaving(false);
+    };
+
     return (
         <div className="min-h-screen flex flex-col items-center justify-center p-4">
             <h1 className="text-4xl font-bold">
                 hackern<span className="text-primary">you</span>sletter
             </h1>
-            <div className="my-6 max-w-96 text-center">
+            <div className="my-6 max-w-96 text-center md:px-0 px-4">
                 A newsletter for the content on{" "}
-                <a href="https://news.ycombinator.com/" className="underline">
+                <a
+                    href="https://news.ycombinator.com/"
+                    className="underline"
+                    target="_blank"
+                >
                     Hacker News
                 </a>{" "}
                 that you're interested in.{" "}
                 {user == null &&
-                    !loading &&
+                    !sessionLoading &&
                     "Sign up to set your interests and start getting cool news."}
             </div>
 
-            {!loading ? (
+            {!sessionLoading && (user ? hasLoadedProfile : true) ? (
                 user ? (
-                    <Card className="min-w-[600px]">
+                    <Card className="md:w-[600px] w-[80%]">
                         <CardContent className="flex flex-col pt-5 space-y-4">
                             <div className="space-y-4">
                                 <Label className="text-lg font-semibold">
@@ -171,7 +215,7 @@ export default function Main() {
                                 </div>
                             )}
                             <p className="text-sm opacity-60">
-                                You will receive emails every{" "}
+                                You will receive a newsletter every{" "}
                                 {frequency == "daily" ? "day" : dayOfWeek} at
                                 8am.
                             </p>
@@ -191,6 +235,11 @@ export default function Main() {
                                     }
                                     className="min-h-[100px]"
                                 />
+                                {error && (
+                                    <div className="text-destructive text-sm">
+                                        {error}
+                                    </div>
+                                )}
                             </div>
                         </CardContent>
                         <CardFooter className="flex items-center justify-between">
@@ -213,6 +262,22 @@ export default function Main() {
                             <Button
                                 className="w-fit bg-primary text-accent font-bold hover:opacity-60 transition duration-200"
                                 type="button"
+                                onClick={() => {
+                                    setIsSaving(true);
+                                    if (interests.length == 0) {
+                                        setError(
+                                            "Please specify your interests."
+                                        );
+                                        setIsSaving(false);
+                                    } else {
+                                        saveProfile(
+                                            user.id,
+                                            interests,
+                                            frequency,
+                                            dayOfWeek
+                                        ).then(() => setIsSaving(false));
+                                    }
+                                }}
                             >
                                 {isSaving ? (
                                     <Spinner className="text-black" />
@@ -291,7 +356,7 @@ export default function Main() {
                                             />
                                         )}
                                         {error && (
-                                            <div className="text-destructive">
+                                            <div className="text-destructive text-sm">
                                                 {error}
                                             </div>
                                         )}
