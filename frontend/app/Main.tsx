@@ -133,13 +133,6 @@ export default function Main() {
         setIsFormLoading(false);
     };
 
-    const validateAndSave = async () => {
-        setIsSaving(true);
-        if (interests.length == 0) {
-        }
-        setIsSaving(false);
-    };
-
     return (
         <div className="min-h-screen flex flex-col items-center justify-center p-4">
             <h1 className="text-4xl font-bold">
