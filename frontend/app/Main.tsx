@@ -18,7 +18,6 @@ import { signInSchema, signUpSchema, resendSchema } from "@/schema";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Spinner } from "@/components/ui/spinner";
-import { useSearchParams } from "next/navigation";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
     Select,
@@ -79,11 +78,7 @@ export default function Main() {
         setError("");
         setIsResend(!isResend);
     };
-    const [error, setError] = useState(
-        useSearchParams().get("error_code") == "otp_expired"
-            ? "There was an error verifying your email. Please resend the verification email."
-            : ""
-    );
+    const [error, setError] = useState("");
 
     const [frequency, setFrequency] = useState<Frequency>("daily");
     const [dayOfWeek, setDayOfWeek] = useState<DayOfWeek>(0);
@@ -147,7 +142,7 @@ export default function Main() {
                 >
                     Hacker News
                 </a>{" "}
-                that you're interested in.{" "}
+                that you&apos;re interested in.{" "}
                 {user == null &&
                     !sessionLoading &&
                     "Sign up to set your interests and start getting cool news."}
@@ -402,7 +397,7 @@ export default function Main() {
                                                 <div className="w-full text-accent flex justify-center">
                                                     {isSignIn ? (
                                                         <div className="flex justify-center items-center">
-                                                            Don't have an
+                                                            Don&apos;t have an
                                                             account?
                                                             <button
                                                                 className="text-primary hover:cursor-pointer ml-1"
