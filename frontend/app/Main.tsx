@@ -33,7 +33,7 @@ import {
     createProfile,
     fetchUserProfile,
     saveProfile,
-} from "@/supabase/actions";
+} from "@/lib/supabase/actions";
 
 const getOrCreateProfile = async (id: string) => {
     let profile = await fetchUserProfile(id);
@@ -42,6 +42,19 @@ const getOrCreateProfile = async (id: string) => {
     }
     return profile;
 };
+
+const DOW = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+];
+
+export type Frequency = "daily" | "weekly";
+export type DayOfWeek = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
 export default function Main() {
     const {
@@ -72,8 +85,8 @@ export default function Main() {
             : ""
     );
 
-    const [frequency, setFrequency] = useState("");
-    const [dayOfWeek, setDayOfWeek] = useState("");
+    const [frequency, setFrequency] = useState<Frequency>("daily");
+    const [dayOfWeek, setDayOfWeek] = useState<DayOfWeek>(0);
     const [interests, setInterests] = useState("");
     const [hasLoadedProfile, setHasLoadedProfile] = useState(false);
 
@@ -83,7 +96,7 @@ export default function Main() {
             if (!profile.data) return;
             const info = profile.data[0];
             setFrequency(info.frequency);
-            setDayOfWeek(info.weekday);
+            setDayOfWeek(info.day_of_week);
             setInterests(info.interests);
             setError("");
             setHasLoadedProfile(true);
@@ -157,7 +170,9 @@ export default function Main() {
                                 </Label>
                                 <RadioGroup
                                     value={frequency}
-                                    onValueChange={setFrequency}
+                                    onValueChange={(v) =>
+                                        setFrequency(v as Frequency)
+                                    }
                                     className="flex flex-col space-y-2"
                                 >
                                     <div className="flex items-center space-x-2">
@@ -182,32 +197,36 @@ export default function Main() {
                                         Select day of the week:
                                     </Label>
                                     <Select
-                                        value={dayOfWeek}
-                                        onValueChange={setDayOfWeek}
+                                        value={dayOfWeek.toString()}
+                                        onValueChange={(v) =>
+                                            setDayOfWeek(
+                                                parseInt(v) as DayOfWeek
+                                            )
+                                        }
                                     >
                                         <SelectTrigger id="day-select">
                                             <SelectValue placeholder="Select a day" />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="Sunday">
+                                            <SelectItem value="0">
                                                 Sunday
                                             </SelectItem>
-                                            <SelectItem value="Monday">
+                                            <SelectItem value="1">
                                                 Monday
                                             </SelectItem>
-                                            <SelectItem value="Tuesday">
+                                            <SelectItem value="2">
                                                 Tuesday
                                             </SelectItem>
-                                            <SelectItem value="Wednesday">
+                                            <SelectItem value="3">
                                                 Wednesday
                                             </SelectItem>
-                                            <SelectItem value="Thursday">
+                                            <SelectItem value="4">
                                                 Thursday
                                             </SelectItem>
-                                            <SelectItem value="Friday">
+                                            <SelectItem value="5">
                                                 Friday
                                             </SelectItem>
-                                            <SelectItem value="Saturday">
+                                            <SelectItem value="6">
                                                 Saturday
                                             </SelectItem>
                                         </SelectContent>
@@ -216,8 +235,7 @@ export default function Main() {
                             )}
                             <p className="text-sm opacity-60">
                                 You will receive a newsletter every{" "}
-                                {frequency == "daily" ? "day" : dayOfWeek} at
-                                8am.
+                                {frequency == "daily" ? "day" : DOW[dayOfWeek]}.
                             </p>
                             <div className="space-y-2">
                                 <Label
@@ -274,7 +292,8 @@ export default function Main() {
                                             user.id,
                                             interests,
                                             frequency,
-                                            dayOfWeek
+                                            dayOfWeek,
+                                            user.email!
                                         ).then(() => setIsSaving(false));
                                     }
                                 }}

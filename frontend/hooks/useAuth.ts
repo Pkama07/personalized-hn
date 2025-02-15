@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { browserSupabase } from "@/supabase/client";
-import { secureSignUp } from "@/supabase/actions";
+import { browserSupabase } from "@/lib/supabase/client";
+import { secureSignUp } from "@/lib/supabase/actions";
 import { User } from "@supabase/supabase-js";
 
 export function useAuth() {

@@ -1,6 +1,8 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
+import { saveUserVector } from "../pinecone";
+import { DayOfWeek, Frequency } from "@/app/Main";
 
 const adminSupabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -16,7 +18,7 @@ export const secureSignUp = async (email: string, password: string) =>
 export const fetchUserProfile = async (id: string) =>
     await adminSupabase
         .from("profiles")
-        .select("frequency, weekday, interests")
+        .select("frequency, day_of_week, interests")
         .eq("id", id);
 
 export const createProfile = async (id: string) =>
@@ -25,17 +27,17 @@ export const createProfile = async (id: string) =>
 export const saveProfile = async (
     id: string,
     interests: string,
-    frequency: string,
-    weekday: string
+    frequency: Frequency,
+    dayOfWeek: DayOfWeek,
+    email: string
 ) => {
-    // create the vector in the database if it does not already exist
-    // if it does exist, update the fields
     await adminSupabase
         .from("profiles")
         .update({
             frequency,
             interests,
-            weekday,
+            day_of_week: dayOfWeek,
         })
         .eq("id", id);
+    await saveUserVector(id, interests, frequency, dayOfWeek, email);
 };
