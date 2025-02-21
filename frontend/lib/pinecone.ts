@@ -1,19 +1,20 @@
 "use server";
 
 import { DayOfWeek, Frequency } from "@/app/Main";
-import { Index, Pinecone, RecordMetadata } from "@pinecone-database/pinecone";
+import {
+    Index,
+    Pinecone,
+    RecordMetadata,
+    RecordValues,
+} from "@pinecone-database/pinecone";
 
 const pc = new Pinecone({
     apiKey: process.env.PINECONE_API_KEY!,
 });
+const newsIndex = pc.Index("news");
 
-const checkIfVectorExists = async (
-    id: string,
-    index: Index<RecordMetadata>
-) => {
-    const fetchResult = await index.namespace("users").fetch([id]);
-    return Object.entries(fetchResult.records).length != 0;
-};
+export const getVector = async (id: string, namespace: string) =>
+    await newsIndex.namespace(namespace).fetch([id]);
 
 const calculateLastUpdated = (frequency: Frequency, dayOfWeek: DayOfWeek) => {
     switch (frequency) {
@@ -56,8 +57,8 @@ export const saveUserVector = async (
     );
     if (!interestEmbedding[0].values)
         return { success: false, error: "could not create embedding" };
-    const newsIndex = pc.Index("news");
-    const isVectorPresent = await checkIfVectorExists(id, newsIndex);
+    const isVectorPresent =
+        Object.entries((await getVector(id, "users")).records).length != 0;
     const lastUpdated = calculateLastUpdated(frequency, dayOfWeek);
     if (isVectorPresent) {
         newsIndex.namespace("users").update({
@@ -84,4 +85,11 @@ export const saveUserVector = async (
         ]);
     }
     return { success: true, error: "" };
+};
+
+export const updateUserValues = async (id: string, values: number[]) => {
+    await newsIndex.namespace("user").update({
+        id,
+        values,
+    });
 };

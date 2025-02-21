@@ -41,3 +41,6 @@ export const saveProfile = async (
         .eq("id", id);
     await saveUserVector(id, interests, frequency, dayOfWeek, email);
 };
+
+export const getItem = async (id: string) =>
+    await adminSupabase.from("items").select("*").eq("id", id);
