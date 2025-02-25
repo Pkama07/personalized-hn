@@ -83,7 +83,7 @@ export const saveUserVector = async (
 };
 
 export const updateUserValues = async (id: string, values: number[]) => {
-    await newsIndex.namespace("user").update({
+    await newsIndex.namespace("users").update({
         id,
         values,
     });
