@@ -13,13 +13,13 @@ import boto3
 from botocore.exceptions import ClientError
 import time
 from supabase import create_client
-
+from datetime import datetime, timedelta
 
 load_dotenv()
 pc_client = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
-# sb_client = create_client(
-#     os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-# )
+sb_client = create_client(
+    os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+)
 bedrock = boto3.client("bedrock")
 s3_client = boto3.client("s3")
 logging.basicConfig(level=logging.INFO)
@@ -162,7 +162,6 @@ def write_to_pinecone(data):
                     "url": d["url"],
                     "time_added": d["time_added"],
                     "passage": d["passage"],
-                    "score": d["score"],
                 },
             }
         )
@@ -176,24 +175,23 @@ def create_inference_job():
         logging.error(item_response["error"])
         exit()
     STORY_COUNT = 100
-    top_ids = [str(id) for id in item_response["items"][200:205]]
+    top_ids = [str(id) for id in item_response["items"][:STORY_COUNT]]
     logging.info("Fetching existing vectors")
-    existing_vectors = (
-        pc_client.Index("news")
-        .fetch(
-            ids=top_ids,
-            namespace="items",
-        )
-        .get("vectors", None)
-    )
-    if existing_vectors is None:
-        logging.error("Unable to fetch existing vectors from the db.")
-        return
     json_data = []
     items = []
+    five_days_ago = datetime.now() - timedelta(days=5)
+    recent_ids = [
+        str(item["id"])
+        for item in (
+            sb_client.table("items")
+            .select("id")
+            .gte("created_at", five_days_ago.isoformat())
+            .execute()
+        ).data
+    ]
     for id in top_ids:
-        if existing_vectors.get(id, None) is not None:
-            logging.info(f"{id} has already been ingested")
+        if id in recent_ids:
+            logging.info(f"{id} has already been ingested in the past 5 days")
             continue
         try:
             logging.info(f"Processing {id}")
@@ -206,18 +204,15 @@ def create_inference_job():
             details = item_details_response["details"]
             id = details["id"]
             url = details.get("url", "")
-            text_input = details.get("text", "") if url == "" else scrape_content(url)
-            s3_client.upload_file(
-                "page.jpg",
-                "batch-inference-input-1739824300",
-                f"input-assets/{id}.jpg",
-            )
             items.append(
                 {
                     "id": id,
                     "url": hn_url if url == "" else url,
                 }
             )
+            text_input = details.get("text", "") if url == "" else scrape_content(url)
+            image_content = open("page.jpg", "rb").read()
+            base64_image = base64.b64encode(image_content).decode("utf-8")
             json_data.append(
                 {
                     "recordID": id,
@@ -231,9 +226,9 @@ def create_inference_job():
                                     {
                                         "type": "image",
                                         "source": {
-                                            "type": "s3",
+                                            "type": "base64",
                                             "media_type": "image/jpeg",
-                                            "data": f"s3://batch-inference-input-1739824300/input-assets/{id}.jpg",
+                                            "data": base64_image,
                                         },
                                     },
                                     {
@@ -250,6 +245,13 @@ def create_inference_job():
             logging.warning(f"Failed to generate data for {id}")
             logging.warning(str(e))
             continue
+    if items:
+        try:
+            sb_client.table("items").upsert(items).execute()
+            logging.info(f"Successfully wrote {len(items)} items to Supabase")
+        except Exception as e:
+            logging.error("Failed to write items to Supabase")
+            logging.error(str(e))
     try:
         should_upload = False
         with open(f"input.jsonl", "a+", encoding="utf-8") as f:
@@ -258,10 +260,6 @@ def create_inference_job():
                 f.write(json_line + "\n")
             f.seek(0)
             should_upload = len(f.readlines()) >= 100
-        # try:
-        #     sb_client.table("items").insert(items).execute()
-        # except:
-        #     pass
         trash = ["page.png", "page.jpg"]
         if should_upload:
             curr_time = int(time.time())
@@ -296,19 +294,58 @@ def create_inference_job():
         logging.error(str(e))
 
 
-if __name__ == "__main__":
-    bedrock.create_model_invocation_job(
-        modelId="anthropic.claude-3-sonnet-20240229-v1:0",
-        jobName=f"batch-inference-balls",
-        inputDataConfig={
-            "s3InputDataConfig": {
-                "s3Uri": f"s3://batch-inference-input-1739824300/input-jsonls/input-1740071275.jsonl",
-                "s3InputFormat": "JSONL",
-                "s3BucketOwner": "165159921038",
+def check_batch_inference_output():
+    try:
+        bucket = "batch-inference-output-1739824300"
+        paginator = s3_client.get_paginator("list_objects_v2")
+        pages = paginator.paginate(Bucket=bucket)
+        output_contents = []
+        for page in pages:
+            if "Contents" not in page:
+                continue
+            for obj in page["Contents"]:
+                key = obj["Key"]
+                if ".jsonl" in key and "input" in key:
+                    response = s3_client.get_object(Bucket=bucket, Key=key)
+                    content = response["Body"].read().decode("utf-8")
+                    output_contents.append(content)
+        return output_contents
+    except Exception as e:
+        logging.error("Failed to check batch inference output")
+        logging.error(str(e))
+        return []
+
+
+def process_topics_dict(topics_dict):
+    items_to_write = []
+    for item_id, topics in topics_dict.items():
+        item_response = safe_get(generate_item_url(item_id), "details")
+        if not item_response["success"]:
+            logging.warning(f"Could not fetch JSON for item {item_id}")
+            continue
+        details = item_response["details"]
+        passage = details.get("title", "") + " " + topics
+        try:
+            sb_client.table("items").update({"passage": passage}).eq(
+                "id", item_id
+            ).execute()
+        except Exception as e:
+            logging.warning(f"Failed to update Supabase for item {item_id}: {str(e)}")
+            continue
+        items_to_write.append(
+            {
+                "id": item_id,
+                "url": details.get("url", ""),
+                "passage": passage,
+                "time_added": int(time.time()),
             }
-        },
-        outputDataConfig={
-            "s3OutputDataConfig": {"s3Uri": f"s3://batch-inference-output-1739824300/"}
-        },
-        roleArn="arn:aws:iam::165159921038:role/AWSBedrockBatchInferenceRole",
-    )
+        )
+    if items_to_write:
+        write_to_pinecone(items_to_write)
+    else:
+        logging.warning("No valid items found to write to Pinecone")
+
+
+if __name__ == "__main__":
+    create_inference_job()
+    # print(check_batch_inference_output())
