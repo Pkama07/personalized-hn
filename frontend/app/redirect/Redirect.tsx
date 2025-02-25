@@ -10,7 +10,7 @@ import { redirect } from "next/navigation";
 import { useSearchParams } from "next/navigation";
 import { useEffect } from "react";
 
-const ALPHA = 0.95;
+const ALPHA = 0.98;
 
 export default function Redirect() {
     const { user, loading } = useAuth();
@@ -18,7 +18,7 @@ export default function Redirect() {
     useEffect(() => {
         if (loading) return;
         processClick(user, itemId);
-    }, [loading]);
+    }, [loading, user, itemId]);
     return (
         <div className="flex flex-col items-center justify-center min-h-screen bg-background">
             <div className="text-center space-y-4">
@@ -33,13 +33,10 @@ export default function Redirect() {
 
 async function processClick(user: User | null, itemId: string | null) {
     if (!itemId || !user) {
-        console.log(itemId);
-        console.log(user);
         redirect("/");
     }
     const { data } = await getItem(itemId);
     if (!data || data.length == 0) {
-        // TODO: figure out intended behavior for when there's an issue fetching
         redirect("/");
     }
     const existingVectorValues = (await getVector(user.id, "users")).records[

@@ -14,6 +14,7 @@ from botocore.exceptions import ClientError
 import time
 from supabase import create_client
 from datetime import datetime, timedelta
+import schedule
 
 load_dotenv()
 pc_client = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
@@ -68,7 +69,7 @@ def scrape_content(url):
 
 def generate_topics(text_input):
     prompt = f"""
-        Generate a concise comma-separated list of key topics of a website given the following info. Only output this list; nothing else. Do not add any text like "here is the list" or anything similar. Below is the text content in each paragraph (under 'Paragraph content:'). There may be little to no information in this if parsing was unsuccessful. I have also provided a screenshot of the page itself, but if it appears to display an error message do not let this error message influence the list. It is possible that some extraneous information is present; for instance, there could be advertisements or secondary articles, so try to focus on the primary content which will likely appear first or in the center.\n\n{text_input}
+        Generate a concise 1-3 sentence description of this website. Below is the text content in each paragraph (under 'Paragraph content:'). There may be little to no information in this if parsing was unsuccessful. I have also provided a screenshot of the page itself, but if it appears to display an error message do not let this error message influence the description. It is possible that some extraneous information is present; for instance, there could be advertisements or secondary articles, so try to focus on the primary content which will likely appear first or in the center.\n\n{text_input}
     """
     with open("page.png", "rb") as img_file:
         img_base64 = base64.b64encode(img_file.read()).decode("utf-8")
@@ -168,7 +169,7 @@ def write_to_pinecone(data):
     pc_client.Index("news").upsert(vectors=records, namespace="items")
 
 
-def create_inference_job():
+def ingest_new_items():
     item_response = safe_get(TOP_STORIES_URL, "items")
     if not item_response["success"]:
         logging.error("Failed to fetch new items.")
@@ -177,18 +178,17 @@ def create_inference_job():
     STORY_COUNT = 100
     top_ids = [str(id) for id in item_response["items"][:STORY_COUNT]]
     logging.info("Fetching existing vectors")
-    json_data = []
-    items = []
-    five_days_ago = datetime.now() - timedelta(days=5)
     recent_ids = [
         str(item["id"])
         for item in (
             sb_client.table("items")
             .select("id")
-            .gte("created_at", five_days_ago.isoformat())
+            .gte("created_at", (datetime.now() - timedelta(days=5)).isoformat())
             .execute()
         ).data
     ]
+    json_data = []
+    items = []
     for id in top_ids:
         if id in recent_ids:
             logging.info(f"{id} has already been ingested in the past 5 days")
@@ -210,9 +210,29 @@ def create_inference_job():
                     "url": hn_url if url == "" else url,
                 }
             )
-            text_input = details.get("text", "") if url == "" else scrape_content(url)
-            image_content = open("page.jpg", "rb").read()
-            base64_image = base64.b64encode(image_content).decode("utf-8")
+            should_scrape = url != ""
+            text_input = (
+                scrape_content(url) if should_scrape else details.get("text", "")
+            )
+            content_list = [
+                {
+                    "type": "text",
+                    "text": f"""Generate a concise comma-separated list of key topics of a website given the following info. Only output this list; nothing else. Do not add any text like "here is the list" or anything similar. Below is the main text content of the website (under 'Main content:') and the text content in each paragraph (under 'Paragraph content:'). There may be little to no information in these if parsing was unsuccessful. I have also provided a screenshot of the page itself prior to any vertical scrolling It is possible that some extraneous information is present; for instance, there could be advertisements or secondary articles, so try to focus on the primary content which will likely appear first or in the center.\n\n{text_input}""",
+                }
+            ]
+            if should_scrape:
+                image_content = open("page.jpg", "rb").read()
+                base64_image = base64.b64encode(image_content).decode("utf-8")
+                content_list.append(
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": base64_image,
+                        },
+                    }
+                )
             json_data.append(
                 {
                     "recordID": id,
@@ -222,20 +242,7 @@ def create_inference_job():
                         "messages": [
                             {
                                 "role": "user",
-                                "content": [
-                                    {
-                                        "type": "image",
-                                        "source": {
-                                            "type": "base64",
-                                            "media_type": "image/jpeg",
-                                            "data": base64_image,
-                                        },
-                                    },
-                                    {
-                                        "type": "text",
-                                        "text": f"""Generate a concise comma-separated list of key topics of a website given the following info. Only output this list; nothing else. Do not add any text like "here is the list" or anything similar. Below is the main text content of the website (under 'Main content:') and the text content in each paragraph (under 'Paragraph content:'). There may be little to no information in these if parsing was unsuccessful. I have also provided a screenshot of the page itself prior to any vertical scrolling It is possible that some extraneous information is present; for instance, there could be advertisements or secondary articles, so try to focus on the primary content which will likely appear first or in the center.\n\n{text_input}""",
-                                    },
-                                ],
+                                "content": content_list,
                             }
                         ],
                     },
@@ -290,7 +297,7 @@ def create_inference_job():
             if os.path.exists(file):
                 os.remove(file)
     except Exception as e:
-        logging.error("Failed to write new articles to the database.")
+        logging.error("Failed to create inference job")
         logging.error(str(e))
 
 
@@ -324,7 +331,7 @@ def process_topics_dict(topics_dict):
             logging.warning(f"Could not fetch JSON for item {item_id}")
             continue
         details = item_response["details"]
-        passage = details.get("title", "") + " " + topics
+        passage = details.get("title", "") + ". " + topics
         try:
             sb_client.table("items").update({"passage": passage}).eq(
                 "id", item_id
@@ -346,6 +353,35 @@ def process_topics_dict(topics_dict):
         logging.warning("No valid items found to write to Pinecone")
 
 
+def remove_old_vectors():
+    logging.info("Removing old vectors from Pinecone")
+    try:
+        DAYS_TO_KEEP = 10
+        cutoff_time = int(time.time()) - (DAYS_TO_KEEP * 24 * 60 * 60)
+        old_vectors = pc_client.Index("news").query(
+            namespace="items",
+            filter={"time_added": {"$lt": cutoff_time}},
+            top_k=10000,
+            include_metadata=False,
+        )
+        if not old_vectors.matches:
+            logging.info("No old vectors found to delete")
+            return
+        vector_ids = [match.id for match in old_vectors.matches]
+        pc_client.Index("news").delete(ids=vector_ids, namespace="items")
+
+        logging.info(f"Successfully removed {len(vector_ids)} old vectors")
+
+    except Exception as e:
+        logging.error("Failed to remove old vectors from Pinecone")
+        logging.error(str(e))
+
+
 if __name__ == "__main__":
-    create_inference_job()
-    # print(check_batch_inference_output())
+    schedule.every(30).minutes.do(ingest_new_items)
+    schedule.every(30).minutes.do(remove_old_vectors)
+    # schedule.every(30).minutes.do(write_vectors)
+
+    while True:
+        schedule.run_pending()
+        time.sleep(1)

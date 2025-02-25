@@ -1,5 +1,10 @@
 import Redirect from "@/app/redirect/Redirect";
+import { Suspense } from "react";
 
 export default function Page() {
-    return <Redirect />;
+    return (
+        <Suspense>
+            <Redirect />
+        </Suspense>
+    );
 }

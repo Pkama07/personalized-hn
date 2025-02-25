@@ -7,10 +7,17 @@ from pinecone import Pinecone
 import re
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
+import schedule
+import time
+from supabase import create_client
+from datetime import datetime, timedelta
 
 logging.basicConfig(level=logging.INFO)
 load_dotenv()
 pc_client = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+sb_client = create_client(
+    os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+)
 news_index = pc_client.Index("news")
 
 DAY_SECONDS = 86400
@@ -46,30 +53,43 @@ def generate_info(outdated_users):
     outdated_users = fetch_outdated_users()
     user_items = {}
     for ou in outdated_users:
-        user_vector = ou["values"]
+        user_vector = ou["values"]  # value vector
         user_metadata = ou["metadata"]
-        last_updated = user_metadata["last_updated"]
+        recent_items = [
+            str(item["item_id"])
+            for item in (
+                sb_client.table("profile_items")
+                .select("item_id")
+                .eq("profile_id", ou["id"])
+                .gte("created_at", (datetime.now() - timedelta(days=10)).isoformat())
+                .execute()
+            ).data
+        ]
         best_articles = news_index.query(
-            top_k=user_metadata["count"],
+            top_k=100,
             vector=user_vector,
             namespace="items",
-            filter={"time_added": {"$gte": last_updated}},
             include_values=False,
             include_metadata=True,
         )
         matches = best_articles["matches"]
         items = []
         for match in matches:
-            item_data = {
-                "hn_url": f"https://news.ycombinator.com/item?id={match['id']}"
-            }
+            if match["id"] in recent_items:
+                continue
             match_metadata = match["metadata"]
-            item_data["external_url"] = match_metadata["url"]
+            item_data = {
+                "id": match["id"],
+                "hn_url": f"https://news.ycombinator.com/item?id={match['id']}",
+                "internal_url": f"https://hackernyousletter.com/redirect?item_id={match['id']}",
+            }
             passage = match_metadata["passage"]
             pos = re.search("\. ", passage)
             item_data["title"] = passage[: pos.start()]
             item_data["description"] = passage[pos.end() :]
             items.append(item_data)
+            if len(items) >= user_metadata["count"]:
+                break
         user_items[(user_metadata["email"], ou["id"])] = items
     return user_items
 
@@ -86,7 +106,7 @@ def send_mail(recipient, html):
         response = sg.send(message)
         logging.info(f"Messaged {recipient} with status code {response.status_code}")
     except Exception as e:
-        print(e.message)
+        logging.error(e.message)
 
 
 def send_newsletters(mailing_info):
@@ -100,6 +120,12 @@ def send_newsletters(mailing_info):
         news_index.update(
             id=k[1], set_metadata={"last_updated": curr_time}, namespace="users"
         )
+        try:
+            sb_client.table("profile_items").insert(
+                [{"profile_id": k[1], "item_id": item["id"]} for item in items]
+            ).execute()
+        except Exception as e:
+            logging.warning(f"Failed to insert profile_item record: {str(e)}")
 
 
 def mail_outdated_users():
@@ -112,4 +138,8 @@ def mail_outdated_users():
 
 
 if __name__ == "__main__":
+    # schedule.every(30).minutes.do(mail_outdated_users)
+    # while True:
+    #     schedule.run_pending()
+    #     time.sleep(1)
     mail_outdated_users()

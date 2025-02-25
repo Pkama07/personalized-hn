@@ -1,12 +1,7 @@
 "use server";
 
 import { DayOfWeek, Frequency } from "@/app/Main";
-import {
-    Index,
-    Pinecone,
-    RecordMetadata,
-    RecordValues,
-} from "@pinecone-database/pinecone";
+import { Pinecone } from "@pinecone-database/pinecone";
 
 const pc = new Pinecone({
     apiKey: process.env.PINECONE_API_KEY!,
