@@ -223,7 +223,8 @@ export default function Main() {
                             )}
                             <p className="text-sm opacity-60">
                                 You will receive a newsletter every{" "}
-                                {frequency == "daily" ? "day" : DOW[dayOfWeek]}.
+                                {frequency == "daily" ? "day" : DOW[dayOfWeek]}{" "}
+                                around 8am.
                             </p>
                             <div className="space-y-2">
                                 <Label
@@ -234,7 +235,7 @@ export default function Main() {
                                 </Label>
                                 <Textarea
                                     id="preferences"
-                                    placeholder="Describe what you're interested in here..."
+                                    placeholder="I like politics, startups, and AI."
                                     value={interests}
                                     onChange={(e) =>
                                         setInterests(e.target.value)
@@ -451,6 +452,26 @@ export default function Main() {
             ) : (
                 <Spinner />
             )}
+            <div className="flex flex-row space-x-2 my-6 items-center">
+                <Button
+                    className="text-black font-semibold hover:bg-transparent hover:shadow-md transition duration-200"
+                    variant="outline"
+                    onClick={() => {
+                        window.open("/how-it-works", "_blank");
+                    }}
+                >
+                    How it works
+                </Button>
+                <Button
+                    className="text-black font-semibold hover:bg-transparent hover:shadow-md transition duration-200"
+                    variant="outline"
+                    onClick={() => {
+                        window.open("/writeup", "_blank");
+                    }}
+                >
+                    Writeup
+                </Button>
+            </div>
         </div>
     );
 }

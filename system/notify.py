@@ -6,7 +6,7 @@ import os
 from pinecone import Pinecone
 import re
 from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail
+from sendgrid.helpers.mail import Mail, Email
 import schedule
 import time
 from supabase import create_client
@@ -20,19 +20,18 @@ sb_client = create_client(
 )
 news_index = pc_client.Index("news")
 
-DAY_SECONDS = 86400
-WEEK_SECONDS = 604800
-
 
 def fetch_outdated_users():
+    DAY_SECONDS = 86400
+    WEEK_SECONDS = 604800
     current_timestamp = int(datetime.now(timezone.utc).timestamp())
-    day_threshold = int(datetime.now(timezone.utc).timestamp()) - 86400
+    day_threshold = current_timestamp - DAY_SECONDS
     with open("dummy_vector.txt", "r") as f:
         dummy_vector = eval(f.read())
     outdated_daily_users = news_index.query(
         filter={"last_updated": {"$lte": day_threshold}, "type": "daily"},
         vector=dummy_vector,
-        top_k=10000,
+        top_k=100,
         namespace="users",
         include_metadata=True,
         include_values=True,
@@ -41,7 +40,7 @@ def fetch_outdated_users():
     outdated_weekly_users = news_index.query(
         filter={"last_updated": {"$lte": week_threshold}, "type": "weekly"},
         vector=dummy_vector,
-        top_k=10000,
+        top_k=100,
         namespace="users",
         include_metadata=True,
         include_values=True,
@@ -50,10 +49,9 @@ def fetch_outdated_users():
 
 
 def generate_info(outdated_users):
-    outdated_users = fetch_outdated_users()
     user_items = {}
     for ou in outdated_users:
-        user_vector = ou["values"]  # value vector
+        user_vector = ou["values"]
         user_metadata = ou["metadata"]
         recent_items = [
             str(item["item_id"])
@@ -78,16 +76,17 @@ def generate_info(outdated_users):
             if match["id"] in recent_items:
                 continue
             match_metadata = match["metadata"]
-            item_data = {
-                "id": match["id"],
-                "hn_url": f"https://news.ycombinator.com/item?id={match['id']}",
-                "internal_url": f"https://hackernyousletter.com/redirect?item_id={match['id']}",
-            }
-            passage = match_metadata["passage"]
-            pos = re.search("\. ", passage)
-            item_data["title"] = passage[: pos.start()]
-            item_data["description"] = passage[pos.end() :]
-            items.append(item_data)
+            items.append(
+                {
+                    "id": match["id"],
+                    "hn_url": f"https://news.ycombinator.com/item?id={match['id']}",
+                    "internal_url": f"https://hackernyousletter.com/redirect?item_id={match['id']}",
+                    "title": match_metadata.get("title", "Item Title"),
+                    "description": match_metadata["passage"].removeprefix(
+                        match_metadata.get("title", "") + ". "
+                    ),
+                }
+            )
             if len(items) >= user_metadata["count"]:
                 break
         user_items[(user_metadata["email"], ou["id"])] = items
@@ -96,7 +95,7 @@ def generate_info(outdated_users):
 
 def send_mail(recipient, html):
     message = Mail(
-        from_email=f"mailman@pradyun.dev",
+        from_email=Email(f"mailman@pradyun.dev", "Hacker Nyousletter"),
         to_emails=recipient,
         subject="Personalized Hacker News Feed",
         html_content=html,

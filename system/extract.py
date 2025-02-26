@@ -171,8 +171,8 @@ def write_to_pinecone(data):
                 "id": d["id"],
                 "values": e["values"],
                 "metadata": {
-                    "url": d["url"],
                     "time_added": d["time_added"],
+                    "title": d["title"],
                     "passage": d["passage"],
                 },
             }
@@ -288,7 +288,7 @@ def ingest_new_items():
                 f"input-{curr_time}.jsonl",
             )
             bedrock.create_model_invocation_job(
-                modelId="anthropic.claude-3-sonnet-20240229-v1:0",
+                modelId="anthropic.claude-3-haiku-20240307-v1:0",
                 jobName=f"batch-inference-{curr_time}",
                 inputDataConfig={
                     "s3InputDataConfig": {
@@ -377,8 +377,8 @@ def process_model_output(model_output):
         items_to_write.append(
             {
                 "id": str(item_id),
-                "url": details.get("url", ""),
                 "passage": passage,
+                "title": details.get("title", ""),
                 "time_added": int(time.time()),
             }
         )
@@ -396,7 +396,7 @@ def remove_old_vectors():
         old_vectors = pc_client.Index("news").query(
             namespace="items",
             filter={"time_added": {"$lt": cutoff_time}},
-            top_k=10000,
+            top_k=1000,
             include_metadata=False,
         )
         if not old_vectors.matches:
@@ -439,14 +439,16 @@ def cleanup_s3_files():
         logging.error(str(e))
 
 
+def process_model_output_wrapper():
+    process_model_output(check_batch_inference_output())
+
+
 if __name__ == "__main__":
     # schedule.every(30).minutes.do(ingest_new_items)
-    # schedule.every(30).minutes.do(remove_old_vectors)
-    # # schedule.every(30).minutes.do(write_vectors)
-
+    # schedule.every(1).day.do(remove_old_vectors)
+    # schedule.every(1).day.do(cleanup_s3_files)
+    # schedule.every(30).minutes.do(process_model_output_wrapper)
     # while True:
     #     schedule.run_pending()
     #     time.sleep(1)
-    # process_model_output(check_batch_inference_output())
-    cleanup_s3_files()
-    # print(check_batch_inference_output())
+    ingest_new_items()
