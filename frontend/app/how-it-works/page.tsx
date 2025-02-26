@@ -10,7 +10,7 @@ export default function HowItWorks() {
                 <div className="space-y-4">
                     <h2 className="text-2xl font-semibold">1. Sign Up</h2>
                     <p className="text-lg">
-                        Create an account to get started. We'll send you a
+                        Create an account to get started. We&apos;ll send you a
                         verification email to confirm your address.
                     </p>
                 </div>
@@ -31,9 +31,9 @@ export default function HowItWorks() {
                         3. Set Your Interests
                     </h2>
                     <p className="text-lg">
-                        Tell us what kind of content you're interested in from
-                        Hacker News. We'll curate stories based on your
-                        preferences.
+                        Tell us what kind of content you&apos;re interested in
+                        from Hacker News. We&apos;ll curate stories based on
+                        your preferences.
                     </p>
                 </div>
 
@@ -42,9 +42,9 @@ export default function HowItWorks() {
                         4. Receive Your Newsletter
                     </h2>
                     <p className="text-lg">
-                        We'll send you a personalized digest of the best Hacker
-                        News content matching your interests, delivered right to
-                        your inbox.
+                        We&apos;ll send you a personalized digest of the best
+                        Hacker News content matching your interests, delivered
+                        right to your inbox.
                     </p>
                 </div>
                 <div className="space-y-4">
