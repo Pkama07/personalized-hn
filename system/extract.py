@@ -15,6 +15,7 @@ import time
 from supabase import create_client
 from datetime import datetime, timedelta
 import schedule
+import re
 
 load_dotenv()
 pc_client = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
@@ -25,6 +26,8 @@ bedrock = boto3.client("bedrock")
 s3_client = boto3.client("s3")
 logging.basicConfig(level=logging.INFO)
 TOP_STORIES_URL = "https://hacker-news.firebaseio.com/v0/topstories.json?print=pretty"
+OUTPUT_BUCKET = os.getenv("OUTPUT_BUCKET")
+INPUT_BUCKET = os.getenv("INPUT_BUCKET")
 
 
 def optimize_image(image_path):
@@ -148,11 +151,19 @@ def generate_item_url(item_id):
 
 
 def write_to_pinecone(data):
-    embeddings = pc_client.inference.embed(
-        model="multilingual-e5-large",
-        inputs=[d["passage"] for d in data],
-        parameters={"input_type": "passage", "truncate": "END"},
-    )
+    start_index = 0
+    end_index = 96
+    embeddings = []
+    while start_index < len(data):
+        embeddings.extend(
+            pc_client.inference.embed(
+                model="multilingual-e5-large",
+                inputs=[d["passage"] for d in data[start_index:end_index]],
+                parameters={"input_type": "passage", "truncate": "END"},
+            )
+        )
+        start_index += 96
+        end_index += 96
     records = []
     for d, e in zip(data, embeddings):
         records.append(
@@ -237,6 +248,7 @@ def ingest_new_items():
                 {
                     "recordID": id,
                     "modelInput": {
+                        "recordID": id,
                         "anthropic_version": "bedrock-2023-05-31",
                         "max_tokens": 100,
                         "messages": [
@@ -272,23 +284,21 @@ def ingest_new_items():
             curr_time = int(time.time())
             s3_client.upload_file(
                 f"input.jsonl",
-                "batch-inference-input-1739824300",
-                f"input-jsonls/input-{curr_time}.jsonl",
+                INPUT_BUCKET,
+                f"input-{curr_time}.jsonl",
             )
             bedrock.create_model_invocation_job(
                 modelId="anthropic.claude-3-sonnet-20240229-v1:0",
                 jobName=f"batch-inference-{curr_time}",
                 inputDataConfig={
                     "s3InputDataConfig": {
-                        "s3Uri": f"s3://batch-inference-input-1739824300/input-jsonls/input-{curr_time}.jsonl",
+                        "s3Uri": f"s3://{INPUT_BUCKET}/input-{curr_time}.jsonl",
                         "s3InputFormat": "JSONL",
                         "s3BucketOwner": "165159921038",
                     }
                 },
                 outputDataConfig={
-                    "s3OutputDataConfig": {
-                        "s3Uri": f"s3://batch-inference-output-1739824300/"
-                    }
+                    "s3OutputDataConfig": {"s3Uri": f"s3://{OUTPUT_BUCKET}/"}
                 },
                 roleArn="arn:aws:iam::165159921038:role/AWSBedrockBatchInferenceRole",
             )
@@ -301,37 +311,62 @@ def ingest_new_items():
         logging.error(str(e))
 
 
+def get_s3_file(bucket, key):
+    response = s3_client.get_object(Bucket=bucket, Key=key)
+    return response["Body"].read().decode("utf-8")
+
+
 def check_batch_inference_output():
     try:
-        bucket = "batch-inference-output-1739824300"
         paginator = s3_client.get_paginator("list_objects_v2")
-        pages = paginator.paginate(Bucket=bucket)
-        output_contents = []
+        pages = paginator.paginate(Bucket=OUTPUT_BUCKET)
+        output_contents = {}
+        count = 0
         for page in pages:
             if "Contents" not in page:
                 continue
             for obj in page["Contents"]:
                 key = obj["Key"]
-                if ".jsonl" in key and "input" in key:
-                    response = s3_client.get_object(Bucket=bucket, Key=key)
-                    content = response["Body"].read().decode("utf-8")
-                    output_contents.append(content)
+                match = re.match(r"input-(\d+)\.jsonl", key)
+                if not match:
+                    continue
+                timestamp = match.group(1)
+                input_content = get_s3_file(INPUT_BUCKET, f"input-{timestamp}.jsonl")
+                record_ids = [
+                    json.loads(line)["recordID"]
+                    for line in input_content.split("\n")
+                    if line
+                ]
+                response = get_s3_file(OUTPUT_BUCKET, key)
+                for line in response.split("\n"):
+                    if line:
+                        try:
+                            json_line = json.loads(line)
+                            record_id = record_ids[count]
+                            model_output = json_line["modelOutput"]["content"][0][
+                                "text"
+                            ]
+                            output_contents[record_id] = model_output
+                        except Exception as e:
+                            logging.warning(f"Failed to parse line: {line}")
+                            logging.warning(str(e))
+                    count += 1
         return output_contents
     except Exception as e:
         logging.error("Failed to check batch inference output")
         logging.error(str(e))
-        return []
+        return {}
 
 
-def process_topics_dict(topics_dict):
+def process_model_output(model_output):
     items_to_write = []
-    for item_id, topics in topics_dict.items():
+    for item_id, output in model_output.items():
         item_response = safe_get(generate_item_url(item_id), "details")
         if not item_response["success"]:
             logging.warning(f"Could not fetch JSON for item {item_id}")
             continue
         details = item_response["details"]
-        passage = details.get("title", "") + ". " + topics
+        passage = details.get("title", "") + ". " + output
         try:
             sb_client.table("items").update({"passage": passage}).eq(
                 "id", item_id
@@ -341,7 +376,7 @@ def process_topics_dict(topics_dict):
             continue
         items_to_write.append(
             {
-                "id": item_id,
+                "id": str(item_id),
                 "url": details.get("url", ""),
                 "passage": passage,
                 "time_added": int(time.time()),
@@ -369,7 +404,6 @@ def remove_old_vectors():
             return
         vector_ids = [match.id for match in old_vectors.matches]
         pc_client.Index("news").delete(ids=vector_ids, namespace="items")
-
         logging.info(f"Successfully removed {len(vector_ids)} old vectors")
 
     except Exception as e:
@@ -377,11 +411,42 @@ def remove_old_vectors():
         logging.error(str(e))
 
 
-if __name__ == "__main__":
-    schedule.every(30).minutes.do(ingest_new_items)
-    schedule.every(30).minutes.do(remove_old_vectors)
-    # schedule.every(30).minutes.do(write_vectors)
+def cleanup_s3_files():
+    logging.info("Cleaning up old S3 files")
+    try:
+        DAYS_TO_KEEP = 0
+        cutoff_time = datetime.now() - timedelta(days=DAYS_TO_KEEP)
+        input_files = s3_client.list_objects_v2(Bucket=INPUT_BUCKET)
+        if "Contents" not in input_files:
+            logging.info("No files found in input bucket")
+            return
+        for obj in input_files["Contents"]:
+            key = obj["Key"]
+            match = re.match(r"input-(\d+)\.jsonl", key)
+            if not match:
+                continue
+            timestamp = int(match.group(1))
+            file_date = datetime.fromtimestamp(timestamp)
+            if file_date < cutoff_time:
+                s3_client.delete_object(Bucket=INPUT_BUCKET, Key=key)
+                output_key = f"output-{timestamp}.jsonl"
+                s3_client.delete_object(Bucket=OUTPUT_BUCKET, Key=output_key)
+                logging.info(f"Deleted old files with timestamp {timestamp}")
+        logging.info("Successfully cleaned up old S3 files")
 
-    while True:
-        schedule.run_pending()
-        time.sleep(1)
+    except Exception as e:
+        logging.error("Failed to clean up old S3 files")
+        logging.error(str(e))
+
+
+if __name__ == "__main__":
+    # schedule.every(30).minutes.do(ingest_new_items)
+    # schedule.every(30).minutes.do(remove_old_vectors)
+    # # schedule.every(30).minutes.do(write_vectors)
+
+    # while True:
+    #     schedule.run_pending()
+    #     time.sleep(1)
+    # process_model_output(check_batch_inference_output())
+    cleanup_s3_files()
+    # print(check_batch_inference_output())
