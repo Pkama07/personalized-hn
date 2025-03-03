@@ -10,7 +10,6 @@ import PIL
 from PIL import Image
 import json
 import boto3
-from botocore.exceptions import ClientError
 import time
 from supabase import create_client
 from datetime import datetime, timedelta
@@ -70,75 +69,6 @@ def scrape_content(url):
         return f"Paragraph content:\n{paragraph_content[:1000]}"
 
 
-def generate_topics(text_input):
-    prompt = f"""
-        Generate a concise 1-3 sentence description of this website. Below is the text content in each paragraph (under 'Paragraph content:'). There may be little to no information in this if parsing was unsuccessful. I have also provided a screenshot of the page itself, but if it appears to display an error message do not let this error message influence the description. It is possible that some extraneous information is present; for instance, there could be advertisements or secondary articles, so try to focus on the primary content which will likely appear first or in the center.\n\n{text_input}
-    """
-    with open("page.png", "rb") as img_file:
-        img_base64 = base64.b64encode(img_file.read()).decode("utf-8")
-    body = json.dumps(
-        {
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 100,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "image/jpeg",
-                                "data": img_base64,
-                            },
-                        },
-                        {"type": "text", "text": prompt},
-                    ],
-                }
-            ],
-        }
-    )
-    max_retries = 8
-    for attempt in range(max_retries):
-        try:
-            response = bedrock.invoke_model(
-                modelId="anthropic.claude-3-sonnet-20240229-v1:0",
-                body=body,
-            )
-            response_body = json.loads(response.get("body").read())
-            text = response_body["content"][0]["text"]
-            return text.split(":", 1)[1].strip() if ":" in text else text
-
-        except ClientError as e:
-            error_code = e.response.get("Error", {}).get("Code", "")
-
-            if error_code in [
-                "ThrottlingException",
-                "TooManyRequestsException",
-                "RequestLimitExceeded",
-            ]:
-                if attempt == max_retries - 1:
-                    logging.warning(f"Max retries reached after {max_retries} attempts")
-                    raise
-
-                delay = 2**attempt
-                logging.info(
-                    f"Rate limited. Retrying in {delay:.2f} seconds... (Attempt {attempt + 1}/{max_retries})"
-                )
-                time.sleep(delay)
-                continue
-            else:
-                raise
-
-
-def summarize(url):
-    logging.info(f"Summarizing {url}")
-    logging.info("scraping the content...")
-    text_input = scrape_content(url)
-    logging.info("generating the summary...")
-    return generate_topics(text_input)
-
-
 def safe_get(url, field):
     try:
         return {"success": True, field: requests.get(url).json()}
@@ -194,7 +124,7 @@ def ingest_new_items():
         for item in (
             sb_client.table("items")
             .select("id")
-            .gte("created_at", (datetime.now() - timedelta(days=5)).isoformat())
+            .gte("created_at", (datetime.now() - timedelta(days=10)).isoformat())
             .execute()
         ).data
     ]
@@ -202,7 +132,7 @@ def ingest_new_items():
     items = []
     for id in top_ids:
         if id in recent_ids:
-            logging.info(f"{id} has already been ingested in the past 5 days")
+            logging.info(f"{id} has already been ingested in the past 10 days")
             continue
         try:
             logging.info(f"Processing {id}")
@@ -214,6 +144,10 @@ def ingest_new_items():
                 continue
             details = item_details_response["details"]
             id = details["id"]
+            score = details.get("score", 0)
+            if score < 100:
+                logging.info(f"{id} has a score of {score}, skipping")
+                continue
             url = details.get("url", "")
             items.append(
                 {
@@ -228,7 +162,7 @@ def ingest_new_items():
             content_list = [
                 {
                     "type": "text",
-                    "text": f"""Generate a concise comma-separated list of key topics of a website given the following info. Only output this list; nothing else. Do not add any text like "here is the list" or anything similar. Below is the main text content of the website (under 'Main content:') and the text content in each paragraph (under 'Paragraph content:'). There may be little to no information in these if parsing was unsuccessful. I have also provided a screenshot of the page itself prior to any vertical scrolling It is possible that some extraneous information is present; for instance, there could be advertisements or secondary articles, so try to focus on the primary content which will likely appear first or in the center.\n\n{text_input}""",
+                    "text": f"""Generate a concise 1-3 sentence description of this website. Below is the text content in each paragraph (under 'Paragraph content:'). There may be little to no information in this if parsing was unsuccessful. I have also provided a screenshot of the page itself, but if it appears to display an error message do not let this error message influence the description. It is possible that some extraneous information is present; for instance, there could be advertisements or secondary articles, so try to focus on the primary content which will likely appear first or in the center.\n\n{text_input}""",
                 }
             ]
             if should_scrape:
@@ -248,7 +182,6 @@ def ingest_new_items():
                 {
                     "recordID": id,
                     "modelInput": {
-                        "recordID": id,
                         "anthropic_version": "bedrock-2023-05-31",
                         "max_tokens": 100,
                         "messages": [
@@ -302,6 +235,7 @@ def ingest_new_items():
                 },
                 roleArn="arn:aws:iam::165159921038:role/AWSBedrockBatchInferenceRole",
             )
+            logging.info(f"Successfully created inference job at {curr_time}")
             trash.append("input.jsonl")
         for file in trash:
             if os.path.exists(file):
@@ -444,11 +378,10 @@ def process_model_output_wrapper():
 
 
 if __name__ == "__main__":
-    # schedule.every(30).minutes.do(ingest_new_items)
-    # schedule.every(1).day.do(remove_old_vectors)
-    # schedule.every(1).day.do(cleanup_s3_files)
-    # schedule.every(30).minutes.do(process_model_output_wrapper)
-    # while True:
-    #     schedule.run_pending()
-    #     time.sleep(1)
-    ingest_new_items()
+    schedule.every(30).minutes.do(ingest_new_items)
+    schedule.every(1).day.do(remove_old_vectors)
+    schedule.every(1).day.do(cleanup_s3_files)
+    schedule.every(30).minutes.do(process_model_output_wrapper)
+    while True:
+        schedule.run_pending()
+        time.sleep(1)

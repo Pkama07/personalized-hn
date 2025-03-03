@@ -137,12 +137,20 @@ export default function Main() {
                 A newsletter for the content on{" "}
                 <a
                     href="https://news.ycombinator.com/"
-                    className="underline"
+                    className="underline text-primary"
                     target="_blank"
                 >
                     Hacker News
                 </a>{" "}
-                that you&apos;re interested in.{" "}
+                that{" "}
+                <a
+                    className="underline text-primary"
+                    target="_blank"
+                    href="/how-it-works"
+                >
+                    you&apos;re interested in
+                </a>
+                .{" "}
                 {user == null &&
                     !sessionLoading &&
                     "Sign up to set your interests and start getting cool news."}
@@ -235,7 +243,7 @@ export default function Main() {
                                 </Label>
                                 <Textarea
                                     id="preferences"
-                                    placeholder="I like politics, startups, and AI."
+                                    placeholder="I like learning about politics, startups, and AI. I also enjoy watching the NBA and reading manga."
                                     value={interests}
                                     onChange={(e) =>
                                         setInterests(e.target.value)

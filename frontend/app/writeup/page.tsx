@@ -51,11 +51,12 @@ export default function Writeup() {
                     <p className="text-lg">
                         To fetch the top stories, I use the Hacker News API.
                         Then, for each article that hasn&apos;t been processed
-                        already, I use Playwright to capture a screenshot of the
-                        article and scrape some of the textual content on the
-                        page (I take a screenshot because parsing the text
-                        content is not always reliable). To reduce the input
-                        token count, I resize the image and make it grayscale.
+                        already and has a score greater than 100, I use
+                        Playwright to capture a screenshot of the article and
+                        scrape some of the textual content on the page (I take a
+                        screenshot because parsing the text content is not
+                        always reliable). To reduce the input token count, I
+                        resize the image and make it grayscale.
                     </p>
                     <p className="text-lg">
                         In order to generate summaries of these articles, I used
@@ -124,8 +125,8 @@ export default function Writeup() {
                         News item. When the user opens this link up, I use the
                         ID in the query parameters to fetch the vector
                         representation of that article which was generated
-                        during the ingestion process and also that own
-                        user&apos;s vector. I then nudge that user&apos;s vector
+                        during the ingestion process and also that user&apos;s
+                        own vector. I then nudge that user&apos;s vector
                         slightly in the direction of the article&apos;s vector
                         with linear interpolation with an alpha of 0.98.
                         Presumably, users will mostly click on the articles they
